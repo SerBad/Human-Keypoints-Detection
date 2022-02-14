@@ -1,5 +1,5 @@
-EasyDict==1.7
-opencv-python==3.4.1.15
+EasyDict==1.9
+opencv-python==4.5.5.62
 Cython
 scipy
 pandas

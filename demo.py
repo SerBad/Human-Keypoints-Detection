@@ -9,11 +9,16 @@
 import sys
 import os
 
-sys.path.append("libs/detector/libs/detector")
-
 import cv2
 import numpy as np
 import argparse
+import time
+import shutil
+import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed, ProcessPoolExecutor
+import numpy as np
+import pandas
+from torch.multiprocessing import Pool, Process, set_start_method
 
 sys.path.append(os.path.dirname(__file__))
 from configs import val_config
@@ -21,6 +26,7 @@ from libs.detector.libs.detector.detector import Detector
 from utils import image_processing, debug, file_processing, torch_tools
 from models import inference
 
+sys.path.append("libs/detector/libs/detector")
 project_root = os.path.dirname(__file__)
 
 
@@ -102,14 +108,29 @@ class PoseEstimation(inference.PoseEstimation):
 
     def detect_image_dir(self, image_dir, detect_person=True, waitKey=0):
         image_list = file_processing.get_files_lists(image_dir)
+
         for i, image_path in enumerate(image_list):
             bgr_image = cv2.imread(image_path)
             # bgr_image = cv2.cvtColor(bgr_image,cv2.COLOR_BGR2RGB)
             # bgr_image = image_processing.resize_image(bgr_image, resize_height=800)
-            kp_points, kp_scores, boxes = self.detect_image(bgr_image,
-                                                            threshhold=self.threshhold,
+            kp_points, kp_scores, boxes = self.detect_image(bgr_image, threshhold=self.threshhold,
                                                             detect_person=detect_person)
+            print("detect_image_dir", image_path, boxes)
             self.show_result(bgr_image, boxes, kp_points, kp_scores, self.skeleton, waitKey)
+
+    def detect_local_image(self, image_path):
+        try:
+            bgr_image = cv2.imread(image_path)
+            kp_points, kp_scores, boxes = self.detect_image(bgr_image, threshhold=self.threshhold, detect_person=True)
+            print("detect_image", image_path, boxes)
+
+            if len(boxes) == 1:
+                return 1, [image_path, [boxes[0][1], boxes[0][2], boxes[0][3], boxes[0][0]]]
+            else:
+                return 0, [image_path, []]
+        except Exception as e:
+            print(image_path, e)
+        return 0, [image_path, []]
 
     def show_result(self, image, boxes, kp_points, kp_scores, skeleton=None, waitKey=0):
         if not skeleton:
@@ -144,14 +165,74 @@ class PoseEstimation(inference.PoseEstimation):
         return vis_image
 
 
+class ImageOptions:
+    def __init__(self):
+        self.parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        self.initialized = False
+
+    def initialize(self):
+        self.parser.add_argument('--path', type=str, required=True, default='results', help='image file path')
+        self.initialized = True
+
+    def parse(self):
+        if not self.initialized:
+            self.initialize()
+        self.opt = self.parser.parse_args()
+
+        return self.opt
+
+
 if __name__ == '__main__':
     # 自定义MPII上半身6个关键点
     # hp = PoseEstimation(config=val_config.body_mpii_192_256, device="cuda:0")
     # COCO共17个关键点
-    # hp = PoseEstimation(config=val_config.person_coco_192_256, device="cuda:0")
+    try:
+        set_start_method('spawn')
+    except RuntimeError:
+        pass
+
+    opt = ImageOptions().parse()
+    print('start detector image', opt)
+    tt = time.time()
+    path = opt.path
+    flist = os.listdir(path)
+
+    bodyRoot = path + "DetectBody"
+
+    if not os.path.exists(bodyRoot):
+        os.makedirs(bodyRoot)
+
+    hp = PoseEstimation(config=val_config.person_coco_192_256, device="cuda:0")
     # 自定义COCO上半身11个关键点
-    hp = PoseEstimation(config=val_config.body_coco_192_256, device="cuda:0")
-    image_dir = "data/test_images"
-    hp.detect_image_dir(image_dir, detect_person=True, waitKey=0)
+    # hp = PoseEstimation(config=val_config.body_coco_192_256, device="cuda:0")
+
     # hp.start_capture(video_path=video_path, save_video=save_video)
     # hp.start_capture(video_path)
+
+    executor = ProcessPoolExecutor(max_workers=1)
+    columns1 = ["image", "face[top, right, bottom, left]"]
+    resultBodyData = []
+    errorImageSize = 0
+    for index1 in range(0, len(flist)):
+        image = path + os.sep + flist[index1]
+
+        futures = []
+        task = executor.submit(hp.detect_local_image, image)
+        futures.append(task)
+
+        for future in as_completed(futures):
+            is_face, data = future.result()
+            if is_face == 1:
+                resultBodyData.append(data)
+                shutil.copyfile(data[0], os.path.join(bodyRoot, os.path.basename(data[0])))
+            else:
+                errorImageSize += 1
+
+            futures.remove(future)
+
+            if len(resultBodyData) + errorImageSize == len(flist):
+                resultBody = pandas.ExcelWriter(bodyRoot + os.sep + "tags.xlsx")
+                pandas.DataFrame(resultBodyData, columns=columns1).to_excel(resultBody, index=False)
+                resultBody.save()
+
+    print('time2 end:', time.time() - tt)

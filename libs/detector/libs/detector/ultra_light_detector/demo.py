@@ -37,6 +37,7 @@ def get_parser():
     parser.add_argument('--image_dir', default=image_dir, type=str, help='directory or image path')
     parser.add_argument('--device', default="cuda:0", type=str, help='cuda:0 or cpu')
     parser.add_argument('--priors_type', default=priors_type, type=str, help='priors type:face or person')
+    parser.add_argument('--path', type=str, required=True, default='results', help='image file path')
     args = parser.parse_args()
     return args
 
