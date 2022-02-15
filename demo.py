@@ -26,7 +26,7 @@ from libs.detector.libs.detector.detector import Detector
 from utils import image_processing, debug, file_processing, torch_tools
 from models import inference
 
-sys.path.append("libs/detector/libs/detector")
+sys.path.append("/home/zhou/Documents/python/Human-Keypoints-Detection/libs/detector/libs/detector")
 project_root = os.path.dirname(__file__)
 
 
@@ -119,18 +119,21 @@ class PoseEstimation(inference.PoseEstimation):
             self.show_result(bgr_image, boxes, kp_points, kp_scores, self.skeleton, waitKey)
 
     def detect_local_image(self, image_path):
+        base_name = os.path.basename(image_path)
         try:
             bgr_image = cv2.imread(image_path)
             kp_points, kp_scores, boxes = self.detect_image(bgr_image, threshhold=self.threshhold, detect_person=True)
-            print("detect_image", image_path, boxes)
 
             if len(boxes) == 1:
-                return 1, [image_path, [boxes[0][1], boxes[0][2], boxes[0][3], boxes[0][0]]]
+                print("detect_image2", image_path, boxes)
+                shutil.copyfile(image_path, os.path.join(bodyRoot, base_name))
+                return 1, [base_name, [boxes[0][1], boxes[0][2], boxes[0][3], boxes[0][0]]]
             else:
-                return 0, [image_path, []]
+                print("detect_image2", image_path, boxes, "不包含")
+                return 0, [base_name, []]
         except Exception as e:
-            print(image_path, e)
-        return 0, [image_path, []]
+            print(image_path, e, "不包含")
+        return 0, [base_name, []]
 
     def show_result(self, image, boxes, kp_points, kp_scores, skeleton=None, waitKey=0):
         if not skeleton:
@@ -209,7 +212,8 @@ if __name__ == '__main__':
     # hp.start_capture(video_path=video_path, save_video=save_video)
     # hp.start_capture(video_path)
 
-    executor = ProcessPoolExecutor(max_workers=1)
+    executor = ThreadPoolExecutor(max_workers=8)
+    # executor = ProcessPoolExecutor(max_workers=1)
     columns1 = ["image", "face[top, right, bottom, left]"]
     resultBodyData = []
     errorImageSize = 0
@@ -224,7 +228,6 @@ if __name__ == '__main__':
             is_face, data = future.result()
             if is_face == 1:
                 resultBodyData.append(data)
-                shutil.copyfile(data[0], os.path.join(bodyRoot, os.path.basename(data[0])))
             else:
                 errorImageSize += 1
 

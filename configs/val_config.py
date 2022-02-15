@@ -627,7 +627,7 @@ person_coco_192_256 = {
         'OKS_THRE': 0.9,
         'IN_VIS_THRE': 0.2,
         'BBOX_THRE': 1.0,
-        "MODEL_FILE": "data/pretrained/person_coco/best_model_178_0.6272.pth",
+        "MODEL_FILE": "/home/zhou/Documents/python/Human-Keypoints-Detection/data/pretrained/person_coco/best_model_178_0.6272.pth",
         'IMAGE_THRE': 0.0,
         'NMS_THRE': 1.0,
         "skeleton": [[15, 13], [13, 11], [16, 14], [14, 12], [11, 12], [5, 11], [6, 12], [5, 6], [5, 7],
