@@ -19,12 +19,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed, ProcessPoolExec
 import numpy as np
 import pandas
 from torch.multiprocessing import Pool, Process, set_start_method
+from PIL import Image
+from PIL import ImageChops
 
 sys.path.append(os.path.dirname(__file__))
 from configs import val_config
 from libs.detector.libs.detector.detector import Detector
 from utils import image_processing, debug, file_processing, torch_tools
 from models import inference
+import json
 
 sys.path.append("/home/zhou/Documents/python/Human-Keypoints-Detection/libs/detector/libs/detector")
 project_root = os.path.dirname(__file__)
@@ -123,16 +126,31 @@ class PoseEstimation(inference.PoseEstimation):
         try:
             bgr_image = cv2.imread(image_path)
             kp_points, kp_scores, boxes = self.detect_image(bgr_image, threshhold=self.threshhold, detect_person=True)
+            image_two = Image.open(image_path)
 
-            if len(boxes) == 1:
-                print("detect_image2", image_path, boxes)
-                shutil.copyfile(image_path, os.path.join(bodyRoot, base_name))
-                return 1, [base_name, [boxes[0][1], boxes[0][2], boxes[0][3], boxes[0][0]]]
+            if len(boxes) >= 1:
+                # print("detect_image2", image_path, boxes)
+                react = 0.0
+                result_box = []
+                for index1 in range(0, len(boxes)):
+                    last_box = [max(boxes[index1][1], 0), min(boxes[index1][2], image_two.width),
+                                min(boxes[index1][3], image_two.height), max(boxes[index1][0], 0)]
+                    lastReact = (last_box[1] - last_box[3]) * (last_box[2] - last_box[0])
+                    if lastReact > react:
+                        react = lastReact
+                        result_box = last_box
+                # shutil.copyfile(image_path, os.path.join(noneBodyRoot, base_name))
+                print("detect_image2", image_path, result_box[1] - result_box[3], "-", result_box[1] - result_box[3],
+                      ":", image_two.width, "-", image_two.height)
+                shutil.move(image_path, os.path.join(bodyRoot, base_name))
+                return 1, [base_name, [int(result_box[0]), int(result_box[1]), int(result_box[2]), int(result_box[3])]]
             else:
                 print("detect_image2", image_path, boxes, "不包含")
+                shutil.copyfile(image_path, os.path.join(noneBodyRoot, base_name))
                 return 0, [base_name, []]
         except Exception as e:
             print(image_path, e, "不包含")
+        shutil.copyfile(image_path, os.path.join(noneBodyRoot, base_name))
         return 0, [base_name, []]
 
     def show_result(self, image, boxes, kp_points, kp_scores, skeleton=None, waitKey=0):
@@ -200,10 +218,18 @@ if __name__ == '__main__':
     path = opt.path
     flist = os.listdir(path)
 
-    bodyRoot = path + "DetectBody"
+    noneBodyRoot = path + "_NoneBodyRoot"
+    if not os.path.exists(noneBodyRoot):
+        os.makedirs(noneBodyRoot)
 
+    bodyRoot = path + "_BodyRoot"
     if not os.path.exists(bodyRoot):
         os.makedirs(bodyRoot)
+
+    # bodyRoot = path + "DetectBody"
+    #
+    # if not os.path.exists(bodyRoot):
+    #     os.makedirs(bodyRoot)
 
     hp = PoseEstimation(config=val_config.person_coco_192_256, device="cuda:0")
     # 自定义COCO上半身11个关键点
@@ -214,9 +240,10 @@ if __name__ == '__main__':
 
     executor = ThreadPoolExecutor(max_workers=8)
     # executor = ProcessPoolExecutor(max_workers=1)
-    columns1 = ["image", "face[top, right, bottom, left]"]
+    # columns1 = ["image", "face[top, right, bottom, left]"]
     resultBodyData = []
-    errorImageSize = 0
+    json_data = []
+    # errorImageSize = 0
     for index1 in range(0, len(flist)):
         image = path + os.sep + flist[index1]
 
@@ -226,16 +253,20 @@ if __name__ == '__main__':
 
         for future in as_completed(futures):
             is_face, data = future.result()
-            if is_face == 1:
-                resultBodyData.append(data)
-            else:
-                errorImageSize += 1
+            # if is_face == 1:
+            resultBodyData.append(data)
+            if len(data[1]) > 0:
+                json_data.append({"img_name": data[0], "box": data[1]})
+            # else:
+            #     errorImageSize += 1
 
             futures.remove(future)
 
-            if len(resultBodyData) + errorImageSize == len(flist):
-                resultBody = pandas.ExcelWriter(bodyRoot + os.sep + "tags.xlsx")
-                pandas.DataFrame(resultBodyData, columns=columns1).to_excel(resultBody, index=False)
-                resultBody.save()
+            # if len(resultBodyData) + errorImageSize == len(flist):
+            if len(resultBodyData) == len(flist):
+                fileName = bodyRoot + os.sep + "shapesJson.json"
+
+                with open(fileName, 'w') as f:
+                    json.dump({"shapes": json_data}, f)
 
     print('time2 end:', time.time() - tt)
